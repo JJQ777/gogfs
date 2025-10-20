@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	namenode "github.com/JJQ777/gogfs/proto/namenode"
-	"github.com/Raghav-JJQ777/gogfs/utils"
+	"github.com/JJQ777/gogfs/utils"
 	"github.com/golang/protobuf/ptypes/empty"
 	"google.golang.org/grpc"
 )
