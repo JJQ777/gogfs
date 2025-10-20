@@ -10,8 +10,8 @@ import (
 	"sort"
 	"sync"
 
-	namenode "github.com/Raghav-Tiruvallur/GoDFS/proto/namenode"
-	"github.com/Raghav-Tiruvallur/GoDFS/utils"
+	namenode "github.com/JJQ777/gogfs/proto/namenode"
+	"github.com/Raghav-JJQ777/gogfs/utils"
 	"github.com/golang/protobuf/ptypes/empty"
 	"google.golang.org/grpc"
 )
