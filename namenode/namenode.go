@@ -77,9 +77,6 @@ func (nameNode *NameNodeData) InitializeNameNode(port string, blockSize int64) {
 
 // persistance
 func (nameNode *NameNodeData) persistMetadataToJSON(filename string) {
-	nameNode.metaLock.Lock()
-	defer nameNode.metaLock.Unlock()
-
 	data := PersistentMetadata{
 		FileToBlockMapping:        nameNode.FileToBlockMapping,
 		DataNodeToBlockMapping:    nameNode.DataNodeToBlockMapping,
@@ -119,7 +116,6 @@ func (nameNode *NameNodeData) loadMetadataFromJSON(filename string) {
 // RPC Methods
 func (nameNode *NameNodeData) Register_DataNode(ctx context.Context, datanodeData *namenode.DatanodeData) (status *namenode.Status, err error) {
 	nameNode.metaLock.Lock()
-	defer nameNode.metaLock.Unlock()
 
 	log.Printf("%s %d\n", datanodeData.DatanodeID, nameNode.BlockSize)
 	_, ok := nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID]
@@ -127,6 +123,7 @@ func (nameNode *NameNodeData) Register_DataNode(ctx context.Context, datanodeDat
 		nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID] = make([]string, 0)
 		dnmetadata := DataNodeMetadata{ID: datanodeData.DatanodeID, Port: datanodeData.DatanodePort, Status: "Available"}
 		nameNode.DataNodeToMetadataMapping[datanodeData.DatanodeID] = dnmetadata
+		nameNode.metaLock.Unlock()
 		nameNode.persistMetadataToJSON(MetadataFile)
 		return &namenode.Status{StatusMessage: "Registered"}, nil
 	}
@@ -166,9 +163,9 @@ func (nameNode *NameNodeData) GetAvailableDatanodes(ctx context.Context, empty *
 
 func (nameNode *NameNodeData) BlockReport(ctx context.Context, dataNodeBlockData *namenode.DatanodeBlockData) (status *namenode.Status, err error) {
 	nameNode.metaLock.Lock()
-	defer nameNode.metaLock.Unlock()
 
 	nameNode.DataNodeToBlockMapping[dataNodeBlockData.DatanodeID] = dataNodeBlockData.Blocks
+	nameNode.metaLock.Unlock()
 	nameNode.persistMetadataToJSON(MetadataFile)
 	return &namenode.Status{StatusMessage: "Block Report Received"}, nil
 }
@@ -212,12 +209,12 @@ func (nameNode *NameNodeData) GetDataNodesForFile(ctx context.Context, fileData 
 
 func (nameNode *NameNodeData) FileBlockMapping(ctx context.Context, fileBlockMetadata *namenode.FileBlockMetadata) (*namenode.Status, error) {
 	nameNode.metaLock.Lock()
-	defer nameNode.metaLock.Unlock()
 
 	filePath := fileBlockMetadata.FilePath
 	blockIDs := fileBlockMetadata.BlockIDs
 
 	nameNode.FileToBlockMapping[filePath] = blockIDs
+	nameNode.metaLock.Unlock()
 	nameNode.persistMetadataToJSON(MetadataFile)
 	return &namenode.Status{StatusMessage: "Success"}, nil
 
