@@ -114,21 +114,27 @@ func (nameNode *NameNodeData) loadMetadataFromJSON(filename string) {
 }
 
 // RPC Methods
-func (nameNode *NameNodeData) Register_DataNode(ctx context.Context, datanodeData *namenode.DatanodeData) (status *namenode.Status, err error) {
+func (nameNode *NameNodeData) Register_DataNode(
+	ctx context.Context,
+	datanodeData *namenode.DatanodeData,
+) (*namenode.Status, error) {
+
 	nameNode.metaLock.Lock()
 
-	log.Printf("%s %d\n", datanodeData.DatanodeID, nameNode.BlockSize)
-	_, ok := nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID]
-	if !ok {
+	_, exists := nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID]
+	if !exists {
 		nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID] = make([]string, 0)
-		dnmetadata := DataNodeMetadata{ID: datanodeData.DatanodeID, Port: datanodeData.DatanodePort, Status: "Available"}
-		nameNode.DataNodeToMetadataMapping[datanodeData.DatanodeID] = dnmetadata
-		nameNode.metaLock.Unlock()
-		nameNode.persistMetadataToJSON(MetadataFile)
-		return &namenode.Status{StatusMessage: "Registered"}, nil
+		dnMeta := DataNodeMetadata{
+			ID: datanodeData.DatanodeID, Port: datanodeData.DatanodePort, Status: "Available",
+		}
+		nameNode.DataNodeToMetadataMapping[datanodeData.DatanodeID] = dnMeta
 	}
-	return &namenode.Status{StatusMessage: "Exists"}, nil
 
+	nameNode.metaLock.Unlock() // 🔓 提前释放锁再写 JSON
+	nameNode.persistMetadataToJSON("metadata.json")
+
+	log.Printf("✅ Registered DataNode %s on port %s", datanodeData.DatanodeID, datanodeData.DatanodePort)
+	return &namenode.Status{StatusMessage: "Registered"}, nil
 }
 
 func (nameNode *NameNodeData) GetAvailableDatanodes(ctx context.Context, empty *empty.Empty) (freeNodes *namenode.FreeDataNodes, err error) {
