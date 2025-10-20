@@ -2,6 +2,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -24,8 +25,11 @@ type DataNode struct {
 	datanodeService.UnimplementedDatanodeServiceServer
 }
 
-func (datanode *DataNode) InitializeDataNode(port string, location string) {
-	idFilePath := filepath.Join(location, "node_id.txt")
+func (datanode *DataNode) InitializeDataNode(port string, baseLocation string) {
+	nodePath := filepath.Join(baseLocation, fmt.Sprintf("port_%s", port))
+	CreateDirectory(nodePath)
+
+	idFilePath := filepath.Join(nodePath, "node_id.txt")
 
 	if idData, err := os.ReadFile(idFilePath); err == nil {
 		datanode.ID = string(idData)
@@ -39,11 +43,12 @@ func (datanode *DataNode) InitializeDataNode(port string, location string) {
 		log.Printf("Generated new DataNode ID: %s", datanode.ID)
 	}
 
-	datanode.DataNodeLocation = filepath.Join(location, datanode.ID)
+	datanode.DataNodeLocation = filepath.Join(nodePath, datanode.ID)
 	CreateDirectory(datanode.DataNodeLocation)
 
 	datanode.loadLocalBlocks()
-	log.Printf("✅ DataNode %s initialized, found %d blocks\n", datanode.ID, len(datanode.Blocks))
+	log.Printf("✅ DataNode %s initialized at %s, found %d blocks\n",
+		datanode.ID, datanode.DataNodeLocation, len(datanode.Blocks))
 }
 
 func (datanode *DataNode) ConnectToNameNode(port string, host string) *grpc.ClientConn {
