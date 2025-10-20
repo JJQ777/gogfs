@@ -25,14 +25,25 @@ type DataNode struct {
 }
 
 func (datanode *DataNode) InitializeDataNode(port string, location string) {
-	datanode.ID = uuid.New().String()
+	idFilePath := filepath.Join(location, "node_id.txt")
+
+	if idData, err := os.ReadFile(idFilePath); err == nil {
+		datanode.ID = string(idData)
+		log.Printf("Loaded existing DataNode ID: %s\n", datanode.ID)
+	} else {
+		datanode.ID = uuid.New().String()
+		err := os.WriteFile(idFilePath, []byte(datanode.ID), 0644)
+		if err != nil {
+			log.Fatalf("Failed to write node_id.txt: %v", err)
+		}
+		log.Printf("Generated new DataNode ID: %s", datanode.ID)
+	}
+
 	datanode.DataNodeLocation = filepath.Join(location, datanode.ID)
 	CreateDirectory(datanode.DataNodeLocation)
 
 	datanode.loadLocalBlocks()
-
-	log.Printf("✅ DataNode %s initialized at %s, found %d existing blocks\n",
-		datanode.ID, datanode.DataNodeLocation, len(datanode.Blocks))
+	log.Printf("✅ DataNode %s initialized, found %d blocks\n", datanode.ID, len(datanode.Blocks))
 }
 
 func (datanode *DataNode) ConnectToNameNode(port string, host string) *grpc.ClientConn {
