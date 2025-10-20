@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	datanodeService "github.com/Raghav-Tiruvallur/GoDFS/proto/datanode"
-	namenodeService "github.com/Raghav-Tiruvallur/GoDFS/proto/namenode"
-	"github.com/Raghav-Tiruvallur/GoDFS/utils"
+	datanodeService "github.com/JJQ777/gogfs/proto/datanode"
+	namenodeService "github.com/JJQ777/gogfs/proto/namenode"
+	"github.com/JJQ777/gogfs/utils"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
