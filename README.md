@@ -44,6 +44,7 @@ source ~/.bashrc   # or ~/.zshrc
 ```
 then rerun `make protoc`
 
+Please ensure that the path does not contain any spaces before run following command to test.
 - Run the namenode: `make run-namenode`
 - Run the datanodes: `make run-datanodes`
 - Run the client write: `make run-client-write`
