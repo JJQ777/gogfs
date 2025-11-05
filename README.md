@@ -49,7 +49,7 @@ Please ensure that the path does not contain any spaces before run following com
 - Run the datanodes: `make run-datanodes`
 - Run the client write: `make run-client-write`
 - Run the client read:  `make run-client-read`
-
+After run the client write successfully, you can close the minigodfs and restart to read, the command will run successfully because of the persistance support.
 
 
 
