@@ -1,6 +1,6 @@
-module github.com/Raghav-Tiruvallur/GoDFS
+module github.com/JJQ777/gogfs
 
-go 1.21.7
+go 1.25.3
 
 require google.golang.org/grpc v1.62.0
 

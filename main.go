@@ -5,9 +5,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/Raghav-Tiruvallur/GoDFS/client"
-	"github.com/Raghav-Tiruvallur/GoDFS/datanode"
-	"github.com/Raghav-Tiruvallur/GoDFS/namenode"
+	"github.com/JJQ777/gogfs/client"
+	"github.com/JJQ777/gogfs/datanode"
+	"github.com/JJQ777/gogfs/namenode"
 )
 
 func main() {

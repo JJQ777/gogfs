@@ -2,21 +2,31 @@ package namenode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net"
+	"os"
 	"sort"
+	"sync"
 
-	namenode "github.com/Raghav-Tiruvallur/GoDFS/proto/namenode"
-	"github.com/Raghav-Tiruvallur/GoDFS/utils"
+	namenode "github.com/JJQ777/gogfs/proto/namenode"
+	"github.com/JJQ777/gogfs/utils"
 	"github.com/golang/protobuf/ptypes/empty"
 	"google.golang.org/grpc"
 )
 
+const MetadataFile = "metadata.json"
+
 type DataNodeMetadata struct {
-	ID     string
-	Port   string
-	Status string
+	ID     string `json:"id"`
+	Port   string `json:"port"`
+	Status string `json:"status"`
+}
+type PersistentMetadata struct {
+	FileToBlockMapping        map[string][]string         `json:"file_to_block"`
+	DataNodeToBlockMapping    map[string][]string         `json:"datanode_to_blocks"`
+	DataNodeToMetadataMapping map[string]DataNodeMetadata `json:"datanode_metadata"`
 }
 type NameNodeData struct {
 	BlockSize                 int64
@@ -24,6 +34,9 @@ type NameNodeData struct {
 	ReplicationFactor         int64
 	DataNodeToMetadataMapping map[string]DataNodeMetadata
 	FileToBlockMapping        map[string][]string
+
+	metaLock sync.RWMutex
+
 	namenode.UnimplementedNamenodeServiceServer
 }
 
@@ -35,10 +48,20 @@ type DataNodeBlockCount struct {
 func (nameNode *NameNodeData) InitializeNameNode(port string, blockSize int64) {
 
 	nameNode.BlockSize = blockSize
-	nameNode.DataNodeToBlockMapping = make(map[string][]string)
-	nameNode.DataNodeToMetadataMapping = make(map[string]DataNodeMetadata)
-	nameNode.FileToBlockMapping = make(map[string][]string)
 	nameNode.ReplicationFactor = 3
+
+	nameNode.loadMetadataFromJSON(MetadataFile)
+
+	if nameNode.DataNodeToBlockMapping == nil {
+		nameNode.DataNodeToBlockMapping = make(map[string][]string)
+	}
+	if nameNode.DataNodeToMetadataMapping == nil {
+		nameNode.DataNodeToMetadataMapping = make(map[string]DataNodeMetadata)
+	}
+	if nameNode.FileToBlockMapping == nil {
+		nameNode.FileToBlockMapping = make(map[string][]string)
+	}
+
 	server := grpc.NewServer()
 	namenode.RegisterNamenodeServiceServer(server, nameNode)
 	address := ":" + port
@@ -52,21 +75,72 @@ func (nameNode *NameNodeData) InitializeNameNode(port string, blockSize int64) {
 	}
 }
 
-func (nameNode *NameNodeData) Register_DataNode(ctx context.Context, datanodeData *namenode.DatanodeData) (status *namenode.Status, err error) {
-
-	log.Printf("%s %d\n", datanodeData.DatanodeID, nameNode.BlockSize)
-	_, ok := nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID]
-	if !ok {
-		nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID] = make([]string, 0)
-		dnmetadata := DataNodeMetadata{ID: datanodeData.DatanodeID, Port: datanodeData.DatanodePort, Status: "Available"}
-		nameNode.DataNodeToMetadataMapping[datanodeData.DatanodeID] = dnmetadata
-		return &namenode.Status{StatusMessage: "Registered"}, nil
+// persistance
+func (nameNode *NameNodeData) persistMetadataToJSON(filename string) {
+	data := PersistentMetadata{
+		FileToBlockMapping:        nameNode.FileToBlockMapping,
+		DataNodeToBlockMapping:    nameNode.DataNodeToBlockMapping,
+		DataNodeToMetadataMapping: nameNode.DataNodeToMetadataMapping,
 	}
-	return &namenode.Status{StatusMessage: "Exists"}, nil
 
+	jsonBytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		log.Printf("Failed to marshal metadata: %v", err)
+		return
+	}
+	if err := os.WriteFile(filename, jsonBytes, 0644); err != nil {
+		log.Printf("Failed to write %s: %v", MetadataFile, err)
+	} else {
+		log.Printf("Metadata persisted to %s", MetadataFile)
+	}
+}
+func (nameNode *NameNodeData) loadMetadataFromJSON(filename string) {
+	file, err := os.ReadFile(filename)
+	if err != nil {
+		log.Printf("No existing %s found, starting fresh", MetadataFile)
+		return
+	}
+	var data PersistentMetadata
+	if err := json.Unmarshal(file, &data); err != nil {
+		log.Printf("Failed to unmarshal %s: %v", MetadataFile, err)
+		return
+	}
+
+	nameNode.FileToBlockMapping = data.FileToBlockMapping
+	nameNode.DataNodeToBlockMapping = data.DataNodeToBlockMapping
+	nameNode.DataNodeToMetadataMapping = data.DataNodeToMetadataMapping
+
+	log.Printf("✅ Metadata loaded from %s", filename)
+}
+
+// RPC Methods
+func (nameNode *NameNodeData) Register_DataNode(
+	ctx context.Context,
+	datanodeData *namenode.DatanodeData,
+) (*namenode.Status, error) {
+
+	nameNode.metaLock.Lock()
+
+	_, exists := nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID]
+	if !exists {
+		nameNode.DataNodeToBlockMapping[datanodeData.DatanodeID] = make([]string, 0)
+		dnMeta := DataNodeMetadata{
+			ID: datanodeData.DatanodeID, Port: datanodeData.DatanodePort, Status: "Available",
+		}
+		nameNode.DataNodeToMetadataMapping[datanodeData.DatanodeID] = dnMeta
+	}
+
+	nameNode.metaLock.Unlock() // 🔓 提前释放锁再写 JSON
+	nameNode.persistMetadataToJSON("metadata.json")
+
+	log.Printf("✅ Registered DataNode %s on port %s", datanodeData.DatanodeID, datanodeData.DatanodePort)
+	return &namenode.Status{StatusMessage: "Registered"}, nil
 }
 
 func (nameNode *NameNodeData) GetAvailableDatanodes(ctx context.Context, empty *empty.Empty) (freeNodes *namenode.FreeDataNodes, err error) {
+	nameNode.metaLock.RLock()
+	defer nameNode.metaLock.RUnlock()
+
 	availableDataNodes := make([]*DataNodeBlockCount, 0)
 	freeDataNodes := make([]*namenode.DatanodeData, 0)
 	for dataNodeID, datanodeMetadata := range nameNode.DataNodeToMetadataMapping {
@@ -81,24 +155,32 @@ func (nameNode *NameNodeData) GetAvailableDatanodes(ctx context.Context, empty *
 	sort.SliceStable(availableDataNodes, func(i, j int) bool {
 		return availableDataNodes[i].BlockCount < availableDataNodes[j].BlockCount
 	})
-	for i := 0; i < int(nameNode.ReplicationFactor); i++ {
+	replicaCount := int(nameNode.ReplicationFactor)
+	if len(availableDataNodes) < replicaCount {
+		replicaCount = len(availableDataNodes)
+	}
+	for i := 0; i < replicaCount; i++ {
 		freeDataNode := &namenode.DatanodeData{DatanodeID: availableDataNodes[i].DataNodeData.DatanodeID, DatanodePort: availableDataNodes[i].DataNodeData.DatanodePort}
 		freeDataNodes = append(freeDataNodes, freeDataNode)
 	}
-	return &namenode.FreeDataNodes{DataNodeIDs: freeDataNodes[:nameNode.ReplicationFactor]}, nil
+	return &namenode.FreeDataNodes{DataNodeIDs: freeDataNodes[:replicaCount]}, nil
 
 }
 
 func (nameNode *NameNodeData) BlockReport(ctx context.Context, dataNodeBlockData *namenode.DatanodeBlockData) (status *namenode.Status, err error) {
+	nameNode.metaLock.Lock()
 
 	nameNode.DataNodeToBlockMapping[dataNodeBlockData.DatanodeID] = dataNodeBlockData.Blocks
-	return &namenode.Status{StatusMessage: "Block Report Recieved"}, nil
+	nameNode.metaLock.Unlock()
+	nameNode.persistMetadataToJSON(MetadataFile)
+	return &namenode.Status{StatusMessage: "Block Report Received"}, nil
 }
 
 func (nameNode *NameNodeData) FindDataNodesByBlock(blockID string) []DataNodeMetadata {
+	nameNode.metaLock.RLock()
+	defer nameNode.metaLock.RUnlock()
 
 	dataNodes := make([]DataNodeMetadata, 0)
-
 	for dataNode, blocks := range nameNode.DataNodeToBlockMapping {
 		if utils.ValueInArray(blockID, blocks) {
 			dataNodes = append(dataNodes, nameNode.DataNodeToMetadataMapping[dataNode])
@@ -109,6 +191,8 @@ func (nameNode *NameNodeData) FindDataNodesByBlock(blockID string) []DataNodeMet
 }
 
 func (nameNode *NameNodeData) GetDataNodesForFile(ctx context.Context, fileData *namenode.FileData) (*namenode.BlockData, error) {
+	nameNode.metaLock.RLock()
+	defer nameNode.metaLock.RUnlock()
 
 	blocks, ok := nameNode.FileToBlockMapping[fileData.FileName]
 	dataNodes := make([]*namenode.BlockDataNode, 0)
@@ -130,11 +214,14 @@ func (nameNode *NameNodeData) GetDataNodesForFile(ctx context.Context, fileData 
 }
 
 func (nameNode *NameNodeData) FileBlockMapping(ctx context.Context, fileBlockMetadata *namenode.FileBlockMetadata) (*namenode.Status, error) {
+	nameNode.metaLock.Lock()
 
 	filePath := fileBlockMetadata.FilePath
 	blockIDs := fileBlockMetadata.BlockIDs
 
 	nameNode.FileToBlockMapping[filePath] = blockIDs
+	nameNode.metaLock.Unlock()
+	nameNode.persistMetadataToJSON(MetadataFile)
 	return &namenode.Status{StatusMessage: "Success"}, nil
 
 }

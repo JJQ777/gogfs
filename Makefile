@@ -22,9 +22,9 @@ run-client-read:
 	./$(BINARY_NAME) client -namenode 8080 -operation read -source-path . -filename big.txt
 run-datanodes:
 	make run
-	sh scripts/run_datanodes.sh
+	bash scripts/run_datanodes.sh
 deps:
 	$(GOGET) -v ./..
 
 protoc: 
-	sh scripts/generate_proto.sh
+	bash scripts/generate_proto.sh
