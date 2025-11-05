@@ -6,6 +6,7 @@ import "google/protobuf/empty.proto";
 
 package proto;
 
+
 service NamenodeService{
     rpc getAvailableDatanodes (google.protobuf.Empty) returns (freeDataNodes);
     rpc register_DataNode(datanodeData) returns (status);

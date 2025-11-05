@@ -1,5 +1,6 @@
 FROM alpine
 
+
 WORKDIR /app
 
 COPY --from=godfs-base /app/go-dfs . 
