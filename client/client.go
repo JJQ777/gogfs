@@ -46,11 +46,12 @@ func (client *ClientData) ConnectToNameNode() *grpc.ClientConn {
 
 }
 
-func GetDataNodeStub(port string) datanodeService.DatanodeServiceClient {
-	connectionString := net.JoinHostPort("localhost", port)
+// FIXED: Now takes both host and port
+func GetDataNodeStub(host string, port string) datanodeService.DatanodeServiceClient {
+	connectionString := net.JoinHostPort(host, port)
 	conn, err := grpc.Dial(connectionString, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Printf("❌ Failed to connect to DataNode on port %s: %v", port, err)
+		log.Printf("❌ Failed to connect to DataNode on %s:%s: %v", host, port, err)
 	}
 	dataNodeClient := datanodeService.NewDatanodeServiceClient(conn)
 	return dataNodeClient
@@ -75,15 +76,17 @@ func ThreadDone(done chan Pair[int, string], blockID string, idx int) {
 
 	done <- Pair[int, string]{first: idx, second: blockID}
 }
-func SendData(dataNodeID string, datanodePort string, done chan Pair[int, string], blockID string, buffer []byte, n int, idx int) {
+
+// FIXED: Now takes full datanode info
+func SendData(datanode *namenodeService.DatanodeData, done chan Pair[int, string], blockID string, buffer []byte, n int, idx int) {
 	clientDataNodeRequest := &datanodeService.ClientToDataNodeRequest{BlockID: blockID, Content: buffer[:n]}
-	datanodeClient := GetDataNodeStub(datanodePort)
+	datanodeClient := GetDataNodeStub(datanode.DatanodeHost, datanode.DatanodePort)
 	response, err := datanodeClient.SendDataToDataNodes(context.Background(), clientDataNodeRequest)
 	if err != nil {
-		log.Printf("❌ Failed to send block %s to DataNode %s: %v", blockID, datanodePort, err)
+		log.Printf("❌ Failed to send block %s to DataNode %s:%s: %v", blockID, datanode.DatanodeHost, datanode.DatanodePort, err)
 		return
 	}
-	log.Printf("✅ Block %s sent to DataNode %s: %s", blockID, datanodePort, response.Message)
+	log.Printf("✅ Block %s sent to DataNode %s:%s: %s", blockID, datanode.DatanodeHost, datanode.DatanodePort, response.Message)
 	ThreadDone(done, blockID, idx)
 }
 
@@ -114,7 +117,7 @@ func (client *ClientData) ProcessData(conn *grpc.ClientConn, blockSize int, done
 		wg2.Add(1)
 		go func(datanode *namenodeService.DatanodeData) {
 			defer wg2.Done()
-			SendData(datanode.DatanodeID, datanode.DatanodePort, done, blockID, buffer, n, idx)
+			SendData(datanode, done, blockID, buffer, n, idx)
 		}(datanode)
 	}
 	wg2.Wait()
@@ -205,7 +208,8 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 		dataNodeIDs := blockDataNode.DataNodeIDs
 		dataNodeIdx := rand.Intn(len(dataNodeIDs))
 		dataNode := dataNodeIDs[dataNodeIdx]
-		dataNodeClient := GetDataNodeStub(dataNode.DatanodePort)
+		// FIXED: Use both host and port
+		dataNodeClient := GetDataNodeStub(dataNode.DatanodeHost, dataNode.DatanodePort)
 		blockRequest := &datanodeService.BlockRequest{BlockID: blockID}
 		blockResponse, err := dataNodeClient.ReadBytesFromDataNode(context.Background(), blockRequest)
 		utils.ErrorHandler(err)
