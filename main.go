@@ -48,7 +48,7 @@ func main() {
 		datanodePtr := &datanode.DataNode{}
 		datanodePtr.InitializeDataNode(*dataNodePortPtr, *dataNodeLocationPtr)
 		conn := datanodePtr.ConnectToNameNode(*nameNodePortPtr, "localhost")
-		datanodePtr.RegisterNode(conn, "localhost", *dataNodePortPtr)
+		datanodePtr.RegisterNode(conn, *dataNodePortPtr, "localhost") // FIXED: port before host
 		go datanodePtr.SendBlockReportToNameNode(conn)
 		datanodePtr.StartServer(*dataNodePortPtr)
 	case "client":
