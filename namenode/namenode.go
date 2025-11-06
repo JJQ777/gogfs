@@ -362,7 +362,10 @@ func (nameNode *NameNodeData) reReplicateBlock(blockID string, deadNodeID string
 	foundSource := false
 	for dnID, blocks := range nameNode.DataNodeToBlockMapping {
 		meta := nameNode.DataNodeToMetadataMapping[dnID]
-		if meta.Status == "Available" && utils.ValueInArray(blockID, blocks) {
+		// Also exclude the dead node
+		if meta.Status == "Available" &&
+			dnID != deadNodeID && // <-- ADD THIS
+			utils.ValueInArray(blockID, blocks) {
 			sourceNode = meta
 			foundSource = true
 			break
