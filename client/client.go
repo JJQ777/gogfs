@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/JJQ777/gogfs/checksum"
@@ -229,6 +230,11 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 			if err != nil {
 				log.Printf("⚠️  Failed to read block %s from %s:%s: %v",
 					blockID, dataNode.DatanodeHost, dataNode.DatanodePort, err)
+
+				// if checksum is wrong report to namenode
+				if strings.Contains(err.Error(), "corruption") || strings.Contains(err.Error(), "checksum") {
+					client.reportCorruptBlock(blockID, dataNode.DatanodeID, "Checksum verification failed on DataNode")
+				}
 				continue
 			}
 
