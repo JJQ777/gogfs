@@ -12,6 +12,7 @@ service NamenodeService{
     rpc getDataNodesForFile (fileData) returns (blockData);
     rpc BlockReport (datanodeBlockData) returns (status);
     rpc FileBlockMapping (fileBlockMetadata) returns (status);
+    rpc DeleteFile (fileData) returns (status);
 }
 
 message freeDataNodes{

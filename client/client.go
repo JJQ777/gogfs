@@ -218,6 +218,9 @@ func (client *ClientData) DeleteFile(conn *grpc.ClientConn, fileName string) {
 	nameNodeStub := client.GetNameNodeStub()
 	fileData := &namenodeService.FileData{FileName: fileName}
 	status, err := nameNodeStub.DeleteFile(context.Background(), fileData)
-	utils.ErrorHandler(err)
-	log.Println("Delete status:", status.StatusMessage)
+	if err != nil {
+		log.Printf("❌ Failed to delete file: %v", err)
+		return
+	}
+	log.Printf("✅ %s", status.StatusMessage)
 }

@@ -480,3 +480,39 @@ func (nameNode *NameNodeData) writeBlockToDataNode(dn DataNodeMetadata, blockID 
 	})
 	return err
 }
+
+func (nameNode *NameNodeData) DeleteFile(ctx context.Context, fileData *namenode.FileData) (*namenode.Status, error) {
+	nameNode.metaLock.Lock()
+	defer nameNode.metaLock.Unlock()
+
+	fileName := fileData.FileName
+
+	// Check if file exists
+	blockIDs, exists := nameNode.FileToBlockMapping[fileName]
+	if !exists {
+		return &namenode.Status{StatusMessage: "File not found"}, errors.New("file does not exist")
+	}
+
+	// Remove file-to-block mapping
+	delete(nameNode.FileToBlockMapping, fileName)
+
+	// Remove blocks from datanode mappings
+	for _, blockID := range blockIDs {
+		for dnID, blocks := range nameNode.DataNodeToBlockMapping {
+			// Remove blockID from this datanode's list
+			newBlocks := []string{}
+			for _, b := range blocks {
+				if b != blockID {
+					newBlocks = append(newBlocks, b)
+				}
+			}
+			nameNode.DataNodeToBlockMapping[dnID] = newBlocks
+		}
+	}
+
+	// Persist metadata
+	nameNode.persistMetadataToJSON(MetadataFile)
+
+	log.Printf("✅ Deleted file: %s (%d blocks)", fileName, len(blockIDs))
+	return &namenode.Status{StatusMessage: "File deleted successfully"}, nil
+}

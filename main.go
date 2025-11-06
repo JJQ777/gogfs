@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/JJQ777/gogfs/client"
 	"github.com/JJQ777/gogfs/datanode"
@@ -60,6 +61,10 @@ func main() {
 		}
 		if *clientOperationPtr == "read" {
 			clientPtr.ReadFile(conn, *clientSourcePathPtr, *clientFilenamePtr)
+		}
+		if *clientOperationPtr == "delete" {
+			filePath := filepath.Join(*clientSourcePathPtr, *clientFilenamePtr)
+			clientPtr.DeleteFile(conn, filePath)
 		}
 
 	}
