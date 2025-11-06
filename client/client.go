@@ -266,3 +266,20 @@ func (client *ClientData) DeleteFile(conn *grpc.ClientConn, fileName string) {
 	}
 	log.Printf("✅ %s", status.StatusMessage)
 }
+
+// reportCorruptBlock reports a corrupt block to NameNode
+func (client *ClientData) reportCorruptBlock(blockID string, datanodeID string, reason string) {
+	nameNodeStub := client.GetNameNodeStub()
+	corruptReport := &namenodeService.CorruptBlockReport{
+		BlockID:    blockID,
+		DatanodeID: datanodeID,
+		Reason:     reason,
+	}
+
+	status, err := nameNodeStub.ReportCorruptBlock(context.Background(), corruptReport)
+	if err != nil {
+		log.Printf("⚠️  Failed to report corrupt block: %v", err)
+		return
+	}
+	log.Printf("📢 Reported corrupt block %s on node %s: %s", blockID, datanodeID, status.StatusMessage)
+}
