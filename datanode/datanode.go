@@ -67,9 +67,14 @@ func CreateDirectory(path string) {
 	}
 }
 
-func (datanode *DataNode) RegisterNode(conn *grpc.ClientConn, port string) {
+// update the DataNode to send this new host information when it registers
+func (datanode *DataNode) RegisterNode(conn *grpc.ClientConn, port string, datanodeHost string) { // <-- ADD datanodeHost PARAMETER
 	client := namenodeService.NewNamenodeServiceClient(conn)
-	status, err := client.Register_DataNode(context.Background(), &namenodeService.DatanodeData{DatanodeID: datanode.ID, DatanodePort: port})
+	status, err := client.Register_DataNode(context.Background(), &namenodeService.DatanodeData{
+		DatanodeID:   datanode.ID,
+		DatanodePort: port,
+		DatanodeHost: datanodeHost, // <-- ADD THIS FIELD
+	})
 	utils.ErrorHandler(err)
 	log.Printf("🧩 DataNode %s registration status: %s\n", datanode.ID, status.StatusMessage)
 }

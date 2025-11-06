@@ -21,6 +21,7 @@ message freeDataNodes{
 message datanodeData{
     string datanodeID = 1;
     string datanodePort = 2;
+    string datanodeHost = 3;
 }
 
 message blockData{
