@@ -48,7 +48,10 @@ func (client *ClientData) ConnectToNameNode() *grpc.ClientConn {
 
 func GetDataNodeStub(port string) datanodeService.DatanodeServiceClient {
 	connectionString := net.JoinHostPort("localhost", port)
-	conn, _ := grpc.Dial(connectionString, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(connectionString, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("❌ Failed to connect to DataNode on port %s: %v", port, err)
+	}
 	dataNodeClient := datanodeService.NewDatanodeServiceClient(conn)
 	return dataNodeClient
 }
@@ -75,9 +78,13 @@ func ThreadDone(done chan Pair[int, string], blockID string, idx int) {
 func SendData(dataNodeID string, datanodePort string, done chan Pair[int, string], blockID string, buffer []byte, n int, idx int) {
 	clientDataNodeRequest := &datanodeService.ClientToDataNodeRequest{BlockID: blockID, Content: buffer[:n]}
 	datanodeClient := GetDataNodeStub(datanodePort)
-	_, _ = datanodeClient.SendDataToDataNodes(context.Background(), clientDataNodeRequest)
+	response, err := datanodeClient.SendDataToDataNodes(context.Background(), clientDataNodeRequest)
+	if err != nil {
+		log.Printf("❌ Failed to send block %s to DataNode %s: %v", blockID, datanodePort, err)
+		return
+	}
+	log.Printf("✅ Block %s sent to DataNode %s: %s", blockID, datanodePort, response.Message)
 	ThreadDone(done, blockID, idx)
-
 }
 
 func (client *ClientData) ProcessData(conn *grpc.ClientConn, blockSize int, done chan Pair[int, string], filePath string, start int, idx int) {
@@ -205,4 +212,12 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 		log.Println(string(blockResponse.FileContent))
 	}
 
+}
+
+func (client *ClientData) DeleteFile(conn *grpc.ClientConn, fileName string) {
+	nameNodeStub := client.GetNameNodeStub()
+	fileData := &namenodeService.FileData{FileName: fileName}
+	status, err := nameNodeStub.DeleteFile(context.Background(), fileData)
+	utils.ErrorHandler(err)
+	log.Println("Delete status:", status.StatusMessage)
 }
