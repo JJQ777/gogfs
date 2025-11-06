@@ -519,3 +519,38 @@ func (nameNode *NameNodeData) DeleteFile(ctx context.Context, fileData *namenode
 	log.Printf("✅ Deleted file: %s (%d blocks)", fileName, len(blockIDs))
 	return &namenode.Status{StatusMessage: "File deleted successfully"}, nil
 }
+
+func (nameNode *NameNodeData) ReportCorruptBlock(ctx context.Context, report *namenode.CorruptBlockReport) (*namenode.Status, error) {
+	nameNode.metaLock.Lock()
+	defer nameNode.metaLock.Unlock()
+
+	blockID := report.BlockID
+	corruptNodeID := report.DatanodeID
+	reason := report.Reason
+
+	log.Printf("🚨 CORRUPT BLOCK REPORT: Block %s on DataNode %s - Reason: %s",
+		blockID, corruptNodeID, reason)
+
+	// Remove the corrupt block from the datanode's block list
+	if blocks, ok := nameNode.DataNodeToBlockMapping[corruptNodeID]; ok {
+		newBlocks := []string{}
+		for _, b := range blocks {
+			if b != blockID {
+				newBlocks = append(newBlocks, b)
+			}
+		}
+		nameNode.DataNodeToBlockMapping[corruptNodeID] = newBlocks
+		log.Printf("Removed corrupt block %s from DataNode %s mapping", blockID, corruptNodeID)
+	}
+
+	// Persist the change
+	nameNode.persistMetadataToJSON(MetadataFile)
+
+	// Trigger re-replication in the background
+	go func() {
+		log.Printf("Triggering re-replication for corrupt block %s", blockID)
+		nameNode.reReplicateBlock(blockID, corruptNodeID)
+	}()
+
+	return &namenode.Status{StatusMessage: "Corrupt block reported and re-replication triggered"}, nil
+}

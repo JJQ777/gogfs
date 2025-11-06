@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JJQ777/gogfs/checksum"
+
 	datanodeService "github.com/JJQ777/gogfs/proto/datanode"
 	namenodeService "github.com/JJQ777/gogfs/proto/namenode"
 	"github.com/JJQ777/gogfs/utils"
@@ -107,37 +109,81 @@ func (datanode *DataNode) persistBlockList() {
 	}
 }
 
-// write
+// SendDataToDataNodes writes block data after verifying checksum
 func (datanode *DataNode) SendDataToDataNodes(ctx context.Context, clientToDataNodeRequest *datanodeService.ClientToDataNodeRequest) (*datanodeService.Status, error) {
 	CreateDirectory(datanode.DataNodeLocation)
-	blockFilePath := filepath.Join(datanode.DataNodeLocation, clientToDataNodeRequest.BlockID+".txt")
 
-	err := os.WriteFile(blockFilePath, clientToDataNodeRequest.Content, os.ModePerm)
+	blockID := clientToDataNodeRequest.BlockID
+	content := clientToDataNodeRequest.Content
+	receivedChecksum := clientToDataNodeRequest.Checksum
+
+	// Verify checksum before saving
+	if !checksum.VerifyChecksum(content, receivedChecksum) {
+		log.Printf("❌ Checksum verification FAILED for block %s during write", blockID)
+		return &datanodeService.Status{Message: "Checksum verification failed"},
+			fmt.Errorf("checksum mismatch")
+	}
+
+	// Save block data
+	blockFilePath := filepath.Join(datanode.DataNodeLocation, blockID+".txt")
+	err := os.WriteFile(blockFilePath, content, os.ModePerm)
 	if err != nil {
-		log.Printf("❌ Failed to write block %s: %v", clientToDataNodeRequest.BlockID, err)
+		log.Printf("❌ Failed to write block %s: %v", blockID, err)
 		return &datanodeService.Status{Message: "Failed"}, err
 	}
 
-	datanode.Blocks = append(datanode.Blocks, clientToDataNodeRequest.BlockID)
+	// Save checksum file
+	checksumFilePath := filepath.Join(datanode.DataNodeLocation, blockID+".checksum")
+	err = os.WriteFile(checksumFilePath, []byte(receivedChecksum), 0644)
+	if err != nil {
+		log.Printf("⚠️  Failed to write checksum file for block %s: %v", blockID, err)
+	}
+
+	// Update block list
+	datanode.Blocks = append(datanode.Blocks, blockID)
 	datanode.persistBlockList()
 
-	log.Printf("Block %s saved successfully on DataNode %s", clientToDataNodeRequest.BlockID, datanode.ID)
-	utils.ErrorHandler(err)
+	log.Printf("✅ Block %s saved with checksum verification on DataNode %s", blockID, datanode.ID)
 	return &datanodeService.Status{Message: "Data saved successfully"}, nil
 }
 
-// read
+// ReadBytesFromDataNode reads block data and verifies integrity
 func (datanode *DataNode) ReadBytesFromDataNode(ctx context.Context, blockRequest *datanodeService.BlockRequest) (*datanodeService.ByteResponse, error) {
 	blockID := blockRequest.BlockID
 	filePath := filepath.Join(datanode.DataNodeLocation, blockID+".txt")
-	log.Println(filePath)
+
+	// Read block content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		log.Printf("❌ Failed to read block %s: %v", blockID, err)
 		return nil, err
 	}
-	utils.ErrorHandler(err)
-	return &datanodeService.ByteResponse{FileContent: content}, nil
+
+	// Read stored checksum
+	checksumFile := filepath.Join(datanode.DataNodeLocation, blockID+".checksum")
+	storedChecksumBytes, err := os.ReadFile(checksumFile)
+	var storedChecksum string
+
+	if err != nil {
+		// If checksum file doesn't exist, compute it from content
+		storedChecksum = checksum.ComputeChecksum(content)
+		os.WriteFile(checksumFile, []byte(storedChecksum), 0644)
+		log.Printf("⚠️  Computed missing checksum for block %s", blockID)
+	} else {
+		storedChecksum = string(storedChecksumBytes)
+	}
+
+	// Verify integrity before returning
+	if !checksum.VerifyChecksum(content, storedChecksum) {
+		log.Printf("💥 CORRUPTION DETECTED: Block %s on DataNode %s", blockID, datanode.ID)
+		return nil, fmt.Errorf("block corruption detected: checksum mismatch")
+	}
+
+	log.Printf("✅ Block %s read and verified from DataNode %s", blockID, datanode.ID)
+	return &datanodeService.ByteResponse{
+		FileContent: content,
+		Checksum:    storedChecksum,
+	}, nil
 }
 
 // report

@@ -13,8 +13,13 @@ service NamenodeService{
     rpc BlockReport (datanodeBlockData) returns (status);
     rpc FileBlockMapping (fileBlockMetadata) returns (status);
     rpc DeleteFile (fileData) returns (status);
+    rpc ReportCorruptBlock (corruptBlockReport) returns (status);
 }
-
+message corruptBlockReport{
+    string blockID = 1;
+    string datanodeID = 2;
+    string reason = 3;
+}
 message freeDataNodes{
     repeated datanodeData dataNodeIDs = 1;
 }
@@ -49,3 +54,4 @@ message datanodeBlockData{
     string datanodeID = 1;
     repeated string blocks = 2;
 }
+

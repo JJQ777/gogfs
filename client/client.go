@@ -12,6 +12,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/JJQ777/gogfs/checksum"
 	datanodeService "github.com/JJQ777/gogfs/proto/datanode"
 	namenodeService "github.com/JJQ777/gogfs/proto/namenode"
 	"github.com/JJQ777/gogfs/utils"
@@ -77,16 +78,23 @@ func ThreadDone(done chan Pair[int, string], blockID string, idx int) {
 	done <- Pair[int, string]{first: idx, second: blockID}
 }
 
-// FIXED: Now takes full datanode info
 func SendData(datanode *namenodeService.DatanodeData, done chan Pair[int, string], blockID string, buffer []byte, n int, idx int) {
-	clientDataNodeRequest := &datanodeService.ClientToDataNodeRequest{BlockID: blockID, Content: buffer[:n]}
+	// compute checksum
+	checksumValue := checksum.ComputeChecksum(buffer[:n])
+
+	clientDataNodeRequest := &datanodeService.ClientToDataNodeRequest{
+		BlockID:  blockID,
+		Content:  buffer[:n],
+		Checksum: checksumValue,
+	}
 	datanodeClient := GetDataNodeStub(datanode.DatanodeHost, datanode.DatanodePort)
 	response, err := datanodeClient.SendDataToDataNodes(context.Background(), clientDataNodeRequest)
 	if err != nil {
 		log.Printf("❌ Failed to send block %s to DataNode %s:%s: %v", blockID, datanode.DatanodeHost, datanode.DatanodePort, err)
 		return
 	}
-	log.Printf("✅ Block %s sent to DataNode %s:%s: %s", blockID, datanode.DatanodeHost, datanode.DatanodePort, response.Message)
+	log.Printf("✅ Block %s sent to DataNode %s:%s (checksum: %s...): %s",
+		blockID, datanode.DatanodeHost, datanode.DatanodePort, checksumValue[:8], response.Message)
 	ThreadDone(done, blockID, idx)
 }
 
@@ -206,16 +214,46 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 	for _, blockDataNode := range dataNodesBlocks {
 		blockID := blockDataNode.BlockID
 		dataNodeIDs := blockDataNode.DataNodeIDs
-		dataNodeIdx := rand.Intn(len(dataNodeIDs))
-		dataNode := dataNodeIDs[dataNodeIdx]
-		// FIXED: Use both host and port
-		dataNodeClient := GetDataNodeStub(dataNode.DatanodeHost, dataNode.DatanodePort)
-		blockRequest := &datanodeService.BlockRequest{BlockID: blockID}
-		blockResponse, err := dataNodeClient.ReadBytesFromDataNode(context.Background(), blockRequest)
-		utils.ErrorHandler(err)
-		log.Println(string(blockResponse.FileContent))
-	}
 
+		var blockContent []byte
+		var checksumValid bool
+
+		for attempt := 0; attempt < len(dataNodeIDs); attempt++ {
+			dataNodeIdx := (rand.Intn(len(dataNodeIDs)) + attempt) % len(dataNodeIDs)
+			dataNode := dataNodeIDs[dataNodeIdx]
+
+			dataNodeClient := GetDataNodeStub(dataNode.DatanodeHost, dataNode.DatanodePort)
+			blockRequest := &datanodeService.BlockRequest{BlockID: blockID}
+			blockResponse, err := dataNodeClient.ReadBytesFromDataNode(context.Background(), blockRequest)
+
+			if err != nil {
+				log.Printf("⚠️  Failed to read block %s from %s:%s: %v",
+					blockID, dataNode.DatanodeHost, dataNode.DatanodePort, err)
+				continue
+			}
+
+			if checksum.VerifyChecksum(blockResponse.FileContent, blockResponse.Checksum) {
+				log.Printf("✅ Block %s checksum verified from %s:%s",
+					blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
+				blockContent = blockResponse.FileContent
+				checksumValid = true
+				break
+			} else {
+				log.Printf("❌ CORRUPT BLOCK DETECTED! Block %s on %s:%s failed checksum",
+					blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
+
+				client.reportCorruptBlock(blockID, dataNode.DatanodeID, "Checksum mismatch")
+				continue
+			}
+		}
+
+		if !checksumValid {
+			log.Printf("💥 CRITICAL: All replicas of block %s are corrupt!", blockID)
+			utils.ErrorHandler(fmt.Errorf("all replicas corrupt for block %s", blockID))
+		}
+
+		log.Println(string(blockContent))
+	}
 }
 
 func (client *ClientData) DeleteFile(conn *grpc.ClientConn, fileName string) {

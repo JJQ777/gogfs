@@ -13,6 +13,7 @@ service DatanodeService{
 message clientToDataNodeRequest{
     string blockID = 1;
     bytes content = 2;
+    string checksum = 3;
 }
 
 message Status{
@@ -23,4 +24,5 @@ message blockRequest{
 }
 message byteResponse{
     bytes fileContent = 1;
+    string checksum = 2;
 }
