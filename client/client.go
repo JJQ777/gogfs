@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/JJQ777/gogfs/checksum"
 	datanodeService "github.com/JJQ777/gogfs/proto/datanode"
@@ -210,7 +211,7 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 	fileData := &namenodeService.FileData{FileName: filePath}
 	dataNodes, err := nameNodeStub.GetDataNodesForFile(context.Background(), fileData)
 	utils.ErrorHandler(err)
-	rand.Seed(10)
+	rand.Seed(time.Now().UnixNano())
 	dataNodesBlocks := dataNodes.BlockDataNodes
 	for _, blockDataNode := range dataNodesBlocks {
 		blockID := blockDataNode.BlockID
