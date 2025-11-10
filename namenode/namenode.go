@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/JJQ777/gogfs/checksum"
+
 	datanodeService "github.com/JJQ777/gogfs/proto/datanode"
 	namenode "github.com/JJQ777/gogfs/proto/namenode"
 	"github.com/JJQ777/gogfs/utils"
@@ -477,11 +479,15 @@ func (nameNode *NameNodeData) writeBlockToDataNode(dn DataNodeMetadata, blockID 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Compute checksum before sending
+	blockChecksum := checksum.ComputeChecksum(content)
+
 	_, err = client.SendDataToDataNodes(ctx, &datanodeService.ClientToDataNodeRequest{
-		BlockID: blockID,
-		Content: content,
+		BlockID:  blockID,
+		Content:  content,
+		Checksum: blockChecksum, // Add checksum field
 	})
-	return err
+	return err // ✅ Return goes HERE, after the function call
 }
 
 func (nameNode *NameNodeData) DeleteFile(ctx context.Context, fileData *namenode.FileData) (*namenode.Status, error) {
