@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/JJQ777/gogfs/cache"
 	"github.com/JJQ777/gogfs/checksum"
 	datanodeService "github.com/JJQ777/gogfs/proto/datanode"
 	namenodeService "github.com/JJQ777/gogfs/proto/namenode"
@@ -27,6 +28,7 @@ import (
 type ClientData struct {
 	NameNodePort string
 	Port         string
+	Cache        *cache.BlockCache
 }
 
 type Block struct {
@@ -40,6 +42,7 @@ type Pair[T any, V any] struct {
 
 func (client *ClientData) InitializeClient(nameNodePort string) {
 	client.NameNodePort = nameNodePort
+	client.Cache = cache.NewBlockCache("./client-cache")
 }
 func (client *ClientData) ConnectToNameNode() *grpc.ClientConn {
 
@@ -213,6 +216,7 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 	utils.ErrorHandler(err)
 	rand.Seed(time.Now().UnixNano())
 	dataNodesBlocks := dataNodes.BlockDataNodes
+
 	for _, blockDataNode := range dataNodesBlocks {
 		blockID := blockDataNode.BlockID
 		dataNodeIDs := blockDataNode.DataNodeIDs
@@ -220,37 +224,56 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 		var blockContent []byte
 		var checksumValid bool
 
-		for attempt := 0; attempt < len(dataNodeIDs); attempt++ {
-			dataNodeIdx := (rand.Intn(len(dataNodeIDs)) + attempt) % len(dataNodeIDs)
-			dataNode := dataNodeIDs[dataNodeIdx]
-
-			dataNodeClient := GetDataNodeStub(dataNode.DatanodeHost, dataNode.DatanodePort)
-			blockRequest := &datanodeService.BlockRequest{BlockID: blockID}
-			blockResponse, err := dataNodeClient.ReadBytesFromDataNode(context.Background(), blockRequest)
-
-			if err != nil {
-				log.Printf("⚠️  Failed to read block %s from %s:%s: %v",
-					blockID, dataNode.DatanodeHost, dataNode.DatanodePort, err)
-
-				// if checksum is wrong report to namenode
-				if strings.Contains(err.Error(), "corruption") || strings.Contains(err.Error(), "checksum") {
-					client.reportCorruptBlock(blockID, dataNode.DatanodeID, "Checksum verification failed on DataNode")
-				}
-				continue
-			}
-
-			if checksum.VerifyChecksum(blockResponse.FileContent, blockResponse.Checksum) {
-				log.Printf("✅ Block %s checksum verified from %s:%s",
-					blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
-				blockContent = blockResponse.FileContent
+		// ✅ 1️⃣ 先尝试从缓存读取
+		if client.Cache != nil {
+			if cached, ok := client.Cache.Get(blockID); ok {
+				log.Printf("🟢 Cache hit for block %s", blockID)
+				blockContent = cached
 				checksumValid = true
-				break
 			} else {
-				log.Printf("❌ CORRUPT BLOCK DETECTED! Block %s on %s:%s failed checksum",
-					blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
+				log.Printf("🔵 Cache miss for block %s, will fetch from DataNode", blockID)
+			}
+		}
 
-				client.reportCorruptBlock(blockID, dataNode.DatanodeID, "Checksum mismatch")
-				continue
+		// ✅ 2️⃣ 如果缓存没有命中，才去 DataNode 读
+		if !checksumValid {
+			for attempt := 0; attempt < len(dataNodeIDs); attempt++ {
+				dataNodeIdx := (rand.Intn(len(dataNodeIDs)) + attempt) % len(dataNodeIDs)
+				dataNode := dataNodeIDs[dataNodeIdx]
+
+				dataNodeClient := GetDataNodeStub(dataNode.DatanodeHost, dataNode.DatanodePort)
+				blockRequest := &datanodeService.BlockRequest{BlockID: blockID}
+				blockResponse, err := dataNodeClient.ReadBytesFromDataNode(context.Background(), blockRequest)
+
+				if err != nil {
+					log.Printf("⚠️  Failed to read block %s from %s:%s: %v",
+						blockID, dataNode.DatanodeHost, dataNode.DatanodePort, err)
+
+					// if checksum is wrong report to namenode
+					if strings.Contains(err.Error(), "corruption") || strings.Contains(err.Error(), "checksum") {
+						client.reportCorruptBlock(blockID, dataNode.DatanodeID, "Checksum verification failed on DataNode")
+					}
+					continue
+				}
+
+				if checksum.VerifyChecksum(blockResponse.FileContent, blockResponse.Checksum) {
+					log.Printf("✅ Block %s checksum verified from %s:%s",
+						blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
+					blockContent = blockResponse.FileContent
+					checksumValid = true
+
+					// ✅ 3️⃣ 把从 DataNode 拉到的块写入缓存
+					if client.Cache != nil {
+						client.Cache.Put(blockID, blockContent)
+					}
+					break
+				} else {
+					log.Printf("❌ CORRUPT BLOCK DETECTED! Block %s on %s:%s failed checksum",
+						blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
+
+					client.reportCorruptBlock(blockID, dataNode.DatanodeID, "Checksum mismatch")
+					continue
+				}
 			}
 		}
 
@@ -259,6 +282,8 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 			utils.ErrorHandler(fmt.Errorf("all replicas corrupt for block %s", blockID))
 		}
 
+		// ⚠️ 这里你现在是直接 Println string(blockContent)，
+		// 实际系统应该是按顺序写回一个文件，这里先保持你原逻辑不动。
 		log.Println(string(blockContent))
 	}
 }
