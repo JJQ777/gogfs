@@ -152,7 +152,7 @@ func (client *ClientData) WriteFile(conn *grpc.ClientConn, sourcePath string, fi
 
 	fileSize := int(fileInfo.Size())
 
-	// 1️⃣ 正确计算 block 的 offset 列表
+	// 正确计算 block 的 offset 列表
 	var startList []int
 	for offset := 0; offset < fileSize; offset += blockSize {
 		startList = append(startList, offset)
@@ -162,7 +162,7 @@ func (client *ClientData) WriteFile(conn *grpc.ClientConn, sourcePath string, fi
 	log.Printf("📦 File size=%d bytes, blockSize=%d -> %d blocks",
 		fileSize, blockSize, numberOfBlocks)
 
-	// 2️⃣ 并发处理每个 block
+	// 并发处理每个 block
 	done := make(chan Pair[int, string])
 	wg := &sync.WaitGroup{}
 
@@ -174,7 +174,7 @@ func (client *ClientData) WriteFile(conn *grpc.ClientConn, sourcePath string, fi
 		}(i, start)
 	}
 
-	// 3️⃣ 等待完成并收集 blockIDs
+	// 等待完成并收集 blockIDs
 	go func() {
 		wg.Wait()
 		close(done)
@@ -186,20 +186,20 @@ func (client *ClientData) WriteFile(conn *grpc.ClientConn, sourcePath string, fi
 		blockPairs = append(blockPairs, pair)
 	}
 
-	// 4️⃣ 按 block index 排序
+	// 按 block index 排序
 	sort.Slice(blockPairs, func(i, j int) bool {
 		return blockPairs[i].first < blockPairs[j].first
 	})
 
-	// 5️⃣ 提取 blockIDs
+	// 提取 blockIDs
 	var blockIDs []string
 	for _, p := range blockPairs {
 		blockIDs = append(blockIDs, p.second)
 	}
 
-	log.Println("📝 Final blockIDs:", blockIDs)
+	// log.Println("📝 Final blockIDs:", blockIDs)
 
-	// 6️⃣ 写入 FileToBlockMapping
+	// 写入 FileToBlockMapping
 	client.SendFileBlockMappingToNameNode(filePath, blockIDs)
 }
 
