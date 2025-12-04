@@ -147,61 +147,60 @@ func (client *ClientData) WriteFile(conn *grpc.ClientConn, sourcePath string, fi
 	filePath := filepath.Join(sourcePath, fileName)
 
 	blockSize := int(3 * 1024)
-	fileSizeHandler, err := os.Stat(filePath)
-
+	fileInfo, err := os.Stat(filePath)
 	utils.ErrorHandler(err)
 
-	fileSize := int(fileSizeHandler.Size())
+	fileSize := int(fileInfo.Size())
 
-	numberOfBlocks := fileSize / blockSize
-
-	if fileSize%blockSize > 0 {
-		numberOfBlocks++
+	// 1️⃣ 正确计算 block 的 offset 列表
+	var startList []int
+	for offset := 0; offset < fileSize; offset += blockSize {
+		startList = append(startList, offset)
 	}
+	numberOfBlocks := len(startList)
 
+	log.Printf("📦 File size=%d bytes, blockSize=%d -> %d blocks",
+		fileSize, blockSize, numberOfBlocks)
+
+	// 2️⃣ 并发处理每个 block
 	done := make(chan Pair[int, string])
-	startList := make([]int64, 0)
+	wg := &sync.WaitGroup{}
 
-	amount := 0
-
-	for {
-		if amount > fileSize {
-			break
-		}
-		startList = append(startList, int64(amount))
-		amount += blockSize
-
-	}
-	wg1 := &sync.WaitGroup{}
-	for i := 0; i < numberOfBlocks; i++ {
-		wg1.Add(1)
-		go func(start int, idx int) {
-			defer wg1.Done()
+	for i, start := range startList {
+		wg.Add(1)
+		go func(idx int, start int) {
+			defer wg.Done()
 			client.ProcessData(conn, blockSize, done, filePath, start, idx)
-		}(int(startList[i]), i)
+		}(i, start)
 	}
+
+	// 3️⃣ 等待完成并收集 blockIDs
 	go func() {
-		wg1.Wait()
+		wg.Wait()
 		close(done)
 	}()
 
-	sortedblockIDs := make([]Pair[int, string], 0)
-	for i := 0; i < numberOfBlocks; i++ {
-		sortedblockIDs = append(sortedblockIDs, <-done)
+	// 用来按顺序存储 blockIDs
+	blockPairs := make([]Pair[int, string], 0, numberOfBlocks)
+	for pair := range done {
+		blockPairs = append(blockPairs, pair)
 	}
-	for _, block := range sortedblockIDs {
-		fmt.Printf("Before = %d\n", block.first)
-	}
-	sort.Slice(sortedblockIDs, func(i, j int) bool {
-		return sortedblockIDs[i].first < sortedblockIDs[j].first
+
+	// 4️⃣ 按 block index 排序
+	sort.Slice(blockPairs, func(i, j int) bool {
+		return blockPairs[i].first < blockPairs[j].first
 	})
-	blockIDs := make([]string, 0)
-	for _, block := range sortedblockIDs {
-		fmt.Printf("After = %d\n", block.first)
-		blockIDs = append(blockIDs, block.second)
+
+	// 5️⃣ 提取 blockIDs
+	var blockIDs []string
+	for _, p := range blockPairs {
+		blockIDs = append(blockIDs, p.second)
 	}
+
+	log.Println("📝 Final blockIDs:", blockIDs)
+
+	// 6️⃣ 写入 FileToBlockMapping
 	client.SendFileBlockMappingToNameNode(filePath, blockIDs)
-	log.Println("blockIDs:", blockIDs)
 }
 
 func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileName string) {
