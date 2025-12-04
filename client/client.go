@@ -97,7 +97,6 @@ func SendData(datanode *namenodeService.DatanodeData, done chan Pair[int, string
 	}
 	log.Printf("✅ Block %s sent to DataNode %s:%s (checksum: %s...): %s",
 		blockID, datanode.DatanodeHost, datanode.DatanodePort, checksumValue[:8], response.Message)
-	ThreadDone(done, blockID, idx)
 }
 
 func (client *ClientData) ProcessData(conn *grpc.ClientConn, blockSize int, done chan Pair[int, string], filePath string, start int, idx int) {
@@ -131,6 +130,7 @@ func (client *ClientData) ProcessData(conn *grpc.ClientConn, blockSize int, done
 		}(datanode)
 	}
 	wg2.Wait()
+	ThreadDone(done, blockID, idx)
 }
 
 func (client *ClientData) SendFileBlockMappingToNameNode(filePath string, blockIDs []string) {
