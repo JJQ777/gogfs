@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/JJQ777/gogfs/cache"
 	"github.com/JJQ777/gogfs/checksum"
@@ -211,12 +208,31 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 
 	filePath := filepath.Join(source, fileName)
 	nameNodeStub := client.GetNameNodeStub()
+
+	// 1. 从 NameNode 获取所有 block → Datanode 映射
 	fileData := &namenodeService.FileData{FileName: filePath}
 	dataNodes, err := nameNodeStub.GetDataNodesForFile(context.Background(), fileData)
 	utils.ErrorHandler(err)
-	rand.Seed(time.Now().UnixNano())
+
 	dataNodesBlocks := dataNodes.BlockDataNodes
 
+	// 2. 为最终输出文件创建目录
+	outputDir := "./client-output"
+	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
+		log.Fatalf("❌ Failed to create output directory: %v", err)
+	}
+
+	// 3. 创建本地输出文件（覆盖旧的）
+	outputPath := filepath.Join(outputDir, fileName)
+	out, err := os.Create(outputPath)
+	if err != nil {
+		log.Fatalf("❌ Failed to create output file %s: %v", outputPath, err)
+	}
+	defer out.Close()
+
+	log.Printf("📥 Reading file from GFS → local file: %s", outputPath)
+
+	// 4. 遍历所有 block，按顺序恢复文件
 	for _, blockDataNode := range dataNodesBlocks {
 		blockID := blockDataNode.BlockID
 		dataNodeIDs := blockDataNode.DataNodeIDs
@@ -224,68 +240,60 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 		var blockContent []byte
 		var checksumValid bool
 
-		// ✅ 1️⃣ 先尝试从缓存读取
+		// 4.1 尝试从缓存读取
 		if client.Cache != nil {
 			if cached, ok := client.Cache.Get(blockID); ok {
 				log.Printf("🟢 Cache hit for block %s", blockID)
 				blockContent = cached
 				checksumValid = true
 			} else {
-				log.Printf("🔵 Cache miss for block %s, will fetch from DataNode", blockID)
+				log.Printf("🔵 Cache miss for block %s", blockID)
 			}
 		}
 
-		// ✅ 2️⃣ 如果缓存没有命中，才去 DataNode 读
+		// 4.2 缓存未命中 → 从 DataNode 读取
 		if !checksumValid {
-			for attempt := 0; attempt < len(dataNodeIDs); attempt++ {
-				dataNodeIdx := (rand.Intn(len(dataNodeIDs)) + attempt) % len(dataNodeIDs)
-				dataNode := dataNodeIDs[dataNodeIdx]
+			for _, dataNode := range dataNodeIDs {
 
-				dataNodeClient := GetDataNodeStub(dataNode.DatanodeHost, dataNode.DatanodePort)
-				blockRequest := &datanodeService.BlockRequest{BlockID: blockID}
-				blockResponse, err := dataNodeClient.ReadBytesFromDataNode(context.Background(), blockRequest)
+				dnClient := GetDataNodeStub(dataNode.DatanodeHost, dataNode.DatanodePort)
+				blockResponse, err := dnClient.ReadBytesFromDataNode(
+					context.Background(),
+					&datanodeService.BlockRequest{BlockID: blockID},
+				)
 
 				if err != nil {
 					log.Printf("⚠️  Failed to read block %s from %s:%s: %v",
 						blockID, dataNode.DatanodeHost, dataNode.DatanodePort, err)
-
-					// if checksum is wrong report to namenode
-					if strings.Contains(err.Error(), "corruption") || strings.Contains(err.Error(), "checksum") {
-						client.reportCorruptBlock(blockID, dataNode.DatanodeID, "Checksum verification failed on DataNode")
-					}
 					continue
 				}
 
 				if checksum.VerifyChecksum(blockResponse.FileContent, blockResponse.Checksum) {
-					log.Printf("✅ Block %s checksum verified from %s:%s",
-						blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
 					blockContent = blockResponse.FileContent
 					checksumValid = true
 
-					// ✅ 3️⃣ 把从 DataNode 拉到的块写入缓存
+					// 写入缓存
 					if client.Cache != nil {
 						client.Cache.Put(blockID, blockContent)
 					}
 					break
 				} else {
-					log.Printf("❌ CORRUPT BLOCK DETECTED! Block %s on %s:%s failed checksum",
-						blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
-
-					client.reportCorruptBlock(blockID, dataNode.DatanodeID, "Checksum mismatch")
-					continue
+					log.Printf("❌ CORRUPT block %s on %s:%s", blockID, dataNode.DatanodeHost, dataNode.DatanodePort)
 				}
 			}
 		}
 
 		if !checksumValid {
-			log.Printf("💥 CRITICAL: All replicas of block %s are corrupt!", blockID)
 			utils.ErrorHandler(fmt.Errorf("all replicas corrupt for block %s", blockID))
 		}
 
-		// ⚠️ 这里你现在是直接 Println string(blockContent)，
-		// 实际系统应该是按顺序写回一个文件，这里先保持你原逻辑不动。
-		log.Println(string(blockContent))
+		// 4.3 将 block 写入输出文件
+		_, err := out.Write(blockContent)
+		if err != nil {
+			log.Fatalf("❌ Failed writing block %s to output file: %v", blockID, err)
+		}
 	}
+
+	log.Printf("🎉 File restored successfully: %s", outputPath)
 }
 
 func (client *ClientData) DeleteFile(conn *grpc.ClientConn, fileName string) {
