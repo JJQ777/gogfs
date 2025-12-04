@@ -201,7 +201,7 @@ func (client *ClientData) WriteFile(conn *grpc.ClientConn, sourcePath string, fi
 		blockIDs = append(blockIDs, block.second)
 	}
 	client.SendFileBlockMappingToNameNode(filePath, blockIDs)
-
+	log.Println("blockIDs:", blockIDs)
 }
 
 func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileName string) {

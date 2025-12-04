@@ -107,7 +107,7 @@ func (nameNode *NameNodeData) persistMetadataToJSON(filename string) {
 	if err := os.WriteFile(filename, jsonBytes, 0644); err != nil {
 		log.Printf("Failed to write %s: %v", MetadataFile, err)
 	} else {
-		log.Printf("Metadata persisted to %s", MetadataFile)
+		// log.Printf("Metadata persisted to %s", MetadataFile)
 	}
 }
 func (nameNode *NameNodeData) loadMetadataFromJSON(filename string) {
