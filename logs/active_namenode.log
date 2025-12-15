@@ -1,0 +1,30 @@
+2025/12/03 14:38:26 ✅ Metadata loaded from metadata.json
+2025/12/03 14:38:26 🔷 NameNode [a91c0285] is listening on port :8080 as ACTIVE
+2025/12/03 14:38:26 🔄 Active NameNode will sync to Standby at localhost:8081
+2025/12/03 14:38:28 ✅ Connected to Standby NameNode at localhost:8081
+2025/12/03 14:38:28 ⚠️  Failed to sync to standby: rpc error: code = Unavailable desc = connection error: desc = "transport: Error while dialing: dial tcp 127.0.0.1:8081: connect: connection refused"
+2025/12/03 14:38:33 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:38 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:40 Metadata persisted to metadata.json
+2025/12/03 14:38:40 ✅ Registered DataNode bdb4c250-48cd-47c4-8a03-cf6da2316ebc on port 8001
+2025/12/03 14:38:41 Metadata persisted to metadata.json
+2025/12/03 14:38:41 ✅ Registered DataNode 1845c6af-d866-415c-a279-df689b3d3db9 on port 8002
+2025/12/03 14:38:42 Metadata persisted to metadata.json
+2025/12/03 14:38:42 ✅ Registered DataNode 3d5e04d4-db7f-4080-952c-87f5c85e84af on port 8003
+2025/12/03 14:38:43 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:43 Metadata persisted to metadata.json
+2025/12/03 14:38:43 ✅ Registered DataNode cfe8a8f2-54f8-4835-a1d4-5943e88c9b03 on port 8004
+2025/12/03 14:38:44 Metadata persisted to metadata.json
+2025/12/03 14:38:44 ✅ Registered DataNode 1d5244f2-0fde-4dd4-829b-825a33596b37 on port 8005
+2025/12/03 14:38:48 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:48 Metadata persisted to metadata.json
+2025/12/03 14:38:48 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:50 Metadata persisted to metadata.json
+2025/12/03 14:38:50 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:51 Metadata persisted to metadata.json
+2025/12/03 14:38:51 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:52 Metadata persisted to metadata.json
+2025/12/03 14:38:52 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:53 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)
+2025/12/03 14:38:53 Metadata persisted to metadata.json
+2025/12/03 14:38:53 📤 Synced metadata to Standby (Files: 1, DataNodes: 10)

@@ -22,6 +22,10 @@ type DataNode struct {
 	ID               string
 	DataNodeLocation string
 	Blocks           []string
+	Port             string
+	ConfigPath       string
+	ActiveConn       *grpc.ClientConn
+	StopChan         chan struct{} // Channel to signal goroutines to stop
 	datanodeService.UnimplementedDatanodeServiceServer
 }
 
@@ -45,6 +49,9 @@ func (datanode *DataNode) InitializeDataNode(port string, baseLocation string) {
 
 	datanode.DataNodeLocation = filepath.Join(nodePath, datanode.ID)
 	CreateDirectory(datanode.DataNodeLocation)
+	
+	// Initialize stop channel
+	datanode.StopChan = make(chan struct{})
 
 	datanode.loadLocalBlocks()
 	log.Printf("✅ DataNode %s initialized at %s, found %d blocks\n",
@@ -55,6 +62,75 @@ func (datanode *DataNode) ConnectToNameNode(port string, host string) *grpc.Clie
 	connectionString := net.JoinHostPort(host, port)
 	conn, _ := grpc.Dial(connectionString, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	return conn
+}
+
+// ConnectToActiveNameNode uses auto-discovery to find and connect to active NameNode
+func (datanode *DataNode) ConnectToActiveNameNode(configPath string) (*grpc.ClientConn, string, error) {
+	config, err := utils.LoadClusterConfig(configPath)
+	if err != nil {
+		log.Printf("⚠️  Failed to load cluster config: %v, using default", err)
+		config = &utils.NamenodeClusterConfig{
+			Namenodes: []string{"localhost:8080", "localhost:8081"},
+			Primary:   "localhost:8080",
+		}
+	}
+	
+	conn, activeAddr, err := utils.DiscoverActiveNamenode(config)
+	if err != nil {
+		return nil, "", err
+	}
+	
+	return conn, activeAddr, nil
+}
+
+// MonitorConnectionAndReconnect monitors the connection and reconnects if necessary
+func (datanode *DataNode) MonitorConnectionAndReconnect() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		// Try to ping NameNode
+		if datanode.ActiveConn != nil {
+			client := namenodeService.NewNamenodeServiceClient(datanode.ActiveConn)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_, err := client.GetAvailableDatanodes(ctx, nil)
+			cancel()
+			
+			if err != nil {
+				log.Printf("⚠️  Connection to NameNode lost: %v", err)
+				log.Printf("🔄 Attempting to reconnect...")
+				
+				// Stop the old block report goroutine
+				close(datanode.StopChan)
+				time.Sleep(1 * time.Second) // Give it time to stop
+				
+				// Close old connection
+				datanode.ActiveConn.Close()
+				
+				// Try to reconnect
+				conn, activeAddr, err := datanode.ConnectToActiveNameNode(datanode.ConfigPath)
+				if err != nil {
+					log.Printf("❌ Failed to reconnect: %v, will retry...", err)
+					// Reinitialize stop channel for next attempt
+					datanode.StopChan = make(chan struct{})
+					continue
+				}
+				
+				datanode.ActiveConn = conn
+				log.Printf("✅ Reconnected to NameNode at %s", activeAddr)
+				
+				// Reinitialize stop channel
+				datanode.StopChan = make(chan struct{})
+				
+				// Re-register with new NameNode
+				datanode.RegisterNode(conn, datanode.Port)
+				
+				// Restart block report
+				go datanode.SendBlockReportToNameNode(conn)
+				log.Printf("🔄 Block report restarted")
+			}
+		}
+	}
 }
 
 func CreateDirectory(path string) {
@@ -136,25 +212,36 @@ func (datanode *DataNode) ReadBytesFromDataNode(ctx context.Context, blockReques
 }
 
 // report
-func (datanode *DataNode) SendBlockReport(conn *grpc.ClientConn) {
-
+func (datanode *DataNode) SendBlockReport(conn *grpc.ClientConn) error {
 	nameNodeClient := namenodeService.NewNamenodeServiceClient(conn)
 	datanodeBlockData := &namenodeService.DatanodeBlockData{DatanodeID: datanode.ID, Blocks: datanode.Blocks}
 	status, err := nameNodeClient.BlockReport(context.Background(), datanodeBlockData)
-	utils.ErrorHandler(err)
+	if err != nil {
+		return err
+	}
 	log.Println(status.StatusMessage)
+	return nil
 }
 
 func (datanode *DataNode) SendBlockReportToNameNode(conn *grpc.ClientConn) {
 	interval := 10 * time.Second
 	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	
 	for {
 		select {
 		case <-ticker.C:
-			datanode.SendBlockReport(conn)
+			err := datanode.SendBlockReport(conn)
+			if err != nil {
+				log.Printf("⚠️  Failed to send block report: %v", err)
+				// Don't panic, just log the error
+				return
+			}
+		case <-datanode.StopChan:
+			log.Printf("🛑 Block report stopped")
+			return
 		}
 	}
-
 }
 
 func (datanode *DataNode) StartServer(port string) {

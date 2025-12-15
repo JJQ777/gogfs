@@ -6,13 +6,17 @@ import "google/protobuf/empty.proto";
 
 package proto;
 
-
 service NamenodeService{
     rpc getAvailableDatanodes (google.protobuf.Empty) returns (freeDataNodes);
     rpc register_DataNode(datanodeData) returns (status);
     rpc getDataNodesForFile (fileData) returns (blockData);
     rpc BlockReport (datanodeBlockData) returns (status);
     rpc FileBlockMapping (fileBlockMetadata) returns (status);
+    
+    // Standby NameNode sync RPCs
+    rpc SyncMetadata (metadata) returns (status);
+    rpc Heartbeat (namenodeInfo) returns (namenodeInfo);
+    rpc PromoteToActive (google.protobuf.Empty) returns (status);
 }
 
 message freeDataNodes{
@@ -41,10 +45,34 @@ message blockDataNode{
 message status{
     string statusMessage = 1;
 }
+
 message fileData{
     string fileName = 1;
 }
+
 message datanodeBlockData{
     string datanodeID = 1;
     repeated string blocks = 2;
+}
+
+message metadata{
+    map<string, blockList> fileToBlock = 1;
+    map<string, blockList> datanodeToBlocks = 2;
+    map<string, datanodeMetadata> datanodeMetadata = 3;
+}
+
+message blockList{
+    repeated string blocks = 1;
+}
+
+message datanodeMetadata{
+    string id = 1;
+    string port = 2;
+    string status = 3;
+}
+
+message namenodeInfo{
+    string namenodeID = 1;
+    string role = 2;
+    int64 timestamp = 3;
 }

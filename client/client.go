@@ -38,12 +38,24 @@ type Pair[T any, V any] struct {
 func (client *ClientData) InitializeClient(nameNodePort string) {
 	client.NameNodePort = nameNodePort
 }
-func (client *ClientData) ConnectToNameNode() *grpc.ClientConn {
 
-	connectionString := net.JoinHostPort("localhost", client.NameNodePort)
+func (client *ClientData) ConnectToNameNode() *grpc.ClientConn {
+	var connectionString string
+	
+	// Check if NameNodePort already contains host:port format
+	if net.ParseIP(client.NameNodePort) != nil || len(client.NameNodePort) == 0 {
+		// It's just a port number or IP
+		connectionString = net.JoinHostPort("localhost", client.NameNodePort)
+	} else if _, _, err := net.SplitHostPort(client.NameNodePort); err == nil {
+		// It's already in host:port format
+		connectionString = client.NameNodePort
+	} else {
+		// Assume it's just a port number
+		connectionString = net.JoinHostPort("localhost", client.NameNodePort)
+	}
+	
 	conn, _ := grpc.Dial(connectionString, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	return conn
-
 }
 
 func GetDataNodeStub(port string) datanodeService.DatanodeServiceClient {
@@ -54,7 +66,17 @@ func GetDataNodeStub(port string) datanodeService.DatanodeServiceClient {
 }
 
 func (client *ClientData) GetNameNodeStub() namenodeService.NamenodeServiceClient {
-	connectionString := net.JoinHostPort("localhost", client.NameNodePort)
+	var connectionString string
+	
+	// Check if NameNodePort already contains host:port format
+	if _, _, err := net.SplitHostPort(client.NameNodePort); err == nil {
+		// It's already in host:port format
+		connectionString = client.NameNodePort
+	} else {
+		// It's just a port number
+		connectionString = net.JoinHostPort("localhost", client.NameNodePort)
+	}
+	
 	conn, _ := grpc.Dial(connectionString, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	nameNodeClient := namenodeService.NewNamenodeServiceClient(conn)
 	return nameNodeClient
@@ -196,6 +218,13 @@ func (client *ClientData) ReadFile(conn *grpc.ClientConn, source string, fileNam
 	for _, blockDataNode := range dataNodesBlocks {
 		blockID := blockDataNode.BlockID
 		dataNodeIDs := blockDataNode.DataNodeIDs
+		
+		// Check if there are available DataNodes for this block
+		if len(dataNodeIDs) == 0 {
+			log.Printf("⚠️  No DataNodes available for block %s, skipping...", blockID)
+			continue
+		}
+		
 		dataNodeIdx := rand.Intn(len(dataNodeIDs))
 		dataNode := dataNodeIDs[dataNodeIdx]
 		dataNodeClient := GetDataNodeStub(dataNode.DatanodePort)
